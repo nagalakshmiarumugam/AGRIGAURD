@@ -1,34 +1,47 @@
 
 const express = require("express");
 const cors = require("cors");
-const path = require("path");
 
 const app = express();
-
-// Render provides PORT; locally, AGRIGAURD uses port 8000.
 const PORT = process.env.PORT || 8000;
 
 app.use(cors());
 app.use(express.json());
 
+// Store the latest real ESP32 reading in memory.
 let latestData = null;
 
 // Backend health check
 app.get("/api/health", (req, res) => {
     res.json({
         name: "AGRIGAURD Backend",
-        status: "running"
+        status: "running",
+        sensorConnected: latestData !== null
     });
 });
 
-// Receive real ESP32 sensor readings
+// Receive sensor readings from the ESP32 serial bridge
 app.post("/api/sensor-data", (req, res) => {
+    const { deviceId, temperature, humidity, distance, blower } = req.body;
+
+    if (
+        !deviceId ||
+        typeof temperature !== "number" ||
+        typeof humidity !== "number" ||
+        typeof distance !== "number"
+    ) {
+        return res.status(400).json({
+            success: false,
+            message: "Invalid sensor data"
+        });
+    }
+
     latestData = {
-        deviceId: req.body.deviceId,
-        temperature: req.body.temperature,
-        humidity: req.body.humidity,
-        distance: req.body.distance,
-        blower: req.body.blower,
+        deviceId,
+        temperature,
+        humidity,
+        distance,
+        blower: Boolean(blower),
         timestamp: new Date().toISOString()
     };
 
@@ -41,38 +54,21 @@ app.post("/api/sensor-data", (req, res) => {
     });
 });
 
-// Send the latest sensor readings to the dashboard
+// Send the latest reading to the dashboard
 app.get("/api/sensor-data", (req, res) => {
+    if (latestData === null) {
+        return res.status(200).json(null);
+    }
+
     res.json(latestData);
 });
 
-// Serve the built React dashboard when available
-const frontendPath = path.join(
-    __dirname,
-    "..",
-    "frontend",
-    "dist"
-);
-
-app.use(express.static(frontendPath));
-
-// Support React dashboard navigation
-app.get("/{*path}", (req, res, next) => {
-    if (req.path.startsWith("/api/")) {
-        return next();
-    }
-
-    res.sendFile(
-        path.join(frontendPath, "index.html"),
-        (err) => {
-            if (err) {
-                next(err);
-            }
-        }
-    );
+// Backend root route
+app.get("/", (req, res) => {
+    res.send("AGRIGAURD Backend is running. Use /api/health to check status.");
 });
 
-// Listen for connections
+// Start the server
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`AGRIGAURD running on port ${PORT}`);
 });
