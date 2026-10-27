@@ -1,0 +1,723 @@
+
+import { useEffect, useState } from "react";
+import {
+  Activity,
+  BarChart3,
+  CircleCheck,
+  Droplets,
+  Gauge,
+  Leaf,
+  Menu,
+  Radio,
+  Settings,
+  Thermometer,
+  Wind,
+  Wifi,
+  X,
+  Database,
+  Wheat,
+} from "lucide-react";
+import "./App.css";
+
+interface SensorData {
+  deviceId?: string;
+  temperature: number;
+  humidity: number;
+  distance: number;
+  blower?: boolean;
+  timestamp?: string;
+}
+
+interface HistoryPoint {
+  temperature: number;
+  humidity: number;
+  distance: number;
+  time: string;
+}
+
+type Page =
+  | "Dashboard"
+  | "Live Monitoring"
+  | "Analytics"
+  | "Aeration"
+  | "System Settings";
+
+const pages: { name: Page; icon: typeof Gauge }[] = [
+  { name: "Dashboard", icon: Gauge },
+  { name: "Live Monitoring", icon: Activity },
+  { name: "Analytics", icon: BarChart3 },
+  { name: "Aeration", icon: Wind },
+  { name: "System Settings", icon: Settings },
+];
+
+const API_URL = (
+  import.meta.env.VITE_API_URL || "http://localhost:8000"
+).replace(/\/$/, "");
+
+function App() {
+  const [data, setData] = useState<SensorData | null>(null);
+  const [history, setHistory] = useState<HistoryPoint[]>([]);
+  const [backendStatus, setBackendStatus] = useState("CONNECTING");
+  const [activePage, setActivePage] = useState<Page>("Dashboard");
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const getSensorData = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/sensor-data`);
+
+        if (!response.ok) {
+          throw new Error("Backend request failed");
+        }
+
+        const result = await response.json();
+
+        if (!mounted) return;
+
+        const valid =
+          result &&
+          result.temperature !== null &&
+          result.humidity !== null &&
+          result.distance !== null &&
+          Number.isFinite(Number(result.temperature)) &&
+          Number.isFinite(Number(result.humidity)) &&
+          Number.isFinite(Number(result.distance));
+
+        if (!valid) {
+          setBackendStatus("WAITING");
+          setData(null);
+          return;
+        }
+
+        const sensorData: SensorData = {
+          ...result,
+          temperature: Number(result.temperature),
+          humidity: Number(result.humidity),
+          distance: Number(result.distance),
+        };
+
+        setData(sensorData);
+        setBackendStatus("ONLINE");
+
+        const point: HistoryPoint = {
+          temperature: sensorData.temperature,
+          humidity: sensorData.humidity,
+          distance: sensorData.distance,
+          time: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          }),
+        };
+
+        setHistory((previous) => [...previous, point].slice(-30));
+      } catch (error) {
+        if (!mounted) return;
+        console.error("Sensor connection:", error);
+        setBackendStatus("OFFLINE");
+      }
+    };
+
+    getSensorData();
+    const interval = window.setInterval(getSensorData, 2000);
+
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const temperature = data?.temperature ?? null;
+  const humidity = data?.humidity ?? null;
+  const distance = data?.distance ?? null;
+
+  const temperatureAlert =
+    temperature !== null && temperature > 25;
+
+  const humidityAlert =
+    humidity !== null && humidity < 70;
+
+  const blowerOn =
+    temperature !== null &&
+    humidity !== null &&
+    (temperatureAlert || humidityAlert);
+
+  const format = (value: number | null, digits = 1) =>
+    value === null ? "--" : value.toFixed(digits);
+
+  const navigateTo = (page: Page) => {
+    setActivePage(page);
+    setMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  function MetricCard({
+    title,
+    value,
+    unit,
+    icon: Icon,
+    status,
+    footer,
+  }: {
+    title: string;
+    value: string;
+    unit?: string;
+    icon: typeof Gauge;
+    status?: string;
+    footer?: string;
+  }) {
+    const alert = status === "HIGH" || status === "LOW";
+    const active = status === "REQUESTED ON";
+
+    return (
+      <article className="sensor-card">
+        <div className="card-top">
+          <div className="sensor-icon">
+            <Icon size={22} />
+          </div>
+          {status && (
+            <span
+              className={`status-pill ${
+                alert ? "alert-pill" : active ? "active-pill" : ""
+              }`}
+            >
+              <span className="tiny-dot" />
+              {status}
+            </span>
+          )}
+        </div>
+
+        <div className="card-label">{title}</div>
+
+        <div className="sensor-value">
+          {value}
+          {unit && <span>{unit}</span>}
+        </div>
+
+        {footer && (
+          <div className="card-footer">
+            <span>Information</span>
+            <strong>{footer}</strong>
+          </div>
+        )}
+      </article>
+    );
+  }
+
+  function HistoryChart() {
+    return (
+      <section className="panel history-panel">
+        <div className="panel-header">
+          <div>
+            <span className="panel-overline">SENSOR HISTORY</span>
+            <h3>Environmental Trend</h3>
+            <p className="panel-subtitle">
+              Readings received during this browser session
+            </p>
+          </div>
+          <span className="live-indicator">
+            <span className="live-dot" /> LIVE
+          </span>
+        </div>
+
+        {history.length > 0 ? (
+          <div className="chart">
+            <div className="bars">
+              {history.slice(-12).map((point, index) => (
+                <div
+                  className="bar-group"
+                  key={`${point.time}-${index}`}
+                  title={`${point.time} | ${point.temperature}°C | ${point.humidity}%`}
+                >
+                  <div className="bar-pair">
+                    <div
+                      className="bar temperature-bar"
+                      style={{
+                        height: `${Math.min(
+                          100,
+                          Math.max(8, (point.temperature / 50) * 100),
+                        )}%`,
+                      }}
+                    />
+                    <div
+                      className="bar humidity-bar"
+                      style={{
+                        height: `${Math.min(
+                          100,
+                          Math.max(8, point.humidity),
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <small>{point.time}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="empty-chart">
+            <Activity size={34} />
+            <strong>Waiting for sensor readings</strong>
+            <p>Connect the ESP32 USB bridge to display live history.</p>
+          </div>
+        )}
+
+        <div className="chart-legend">
+          <span><i className="legend-temp" /> Temperature</span>
+          <span><i className="legend-humidity" /> Humidity</span>
+        </div>
+      </section>
+    );
+  }
+
+  function GrainSilo() {
+    /*
+      Decorative grain fill only. Do not treat it as a measured
+      percentage until the actual silo height is configured.
+    */
+    const illustrativeFill = 42;
+
+    return (
+      <section className="panel silo-panel">
+        <div className="panel-header">
+          <div>
+            <span className="panel-overline">STORAGE MONITOR</span>
+            <h3>Grain Surface</h3>
+            <p className="panel-subtitle">
+              Ultrasonic distance monitoring
+            </p>
+          </div>
+          <div className="panel-icon"><Wheat size={22} /></div>
+        </div>
+
+        <div className="silo-visual">
+          <div className="silo-wrap">
+            <div className="silo-roof">
+              <div className="roof-cap" />
+            </div>
+            <div className="silo-body">
+              <div className="silo-rim" />
+              <div
+                className="grain-fill"
+                style={{ height: `${illustrativeFill}%` }}
+              >
+                <div className="grain-wave" />
+                <div className="grain-texture" />
+              </div>
+              <div className="silo-center-line" />
+              <div className="silo-level-label level-100">100%</div>
+              <div className="silo-level-label level-75">75%</div>
+              <div className="silo-level-label level-50">50%</div>
+              <div className="silo-level-label level-25">25%</div>
+            </div>
+            <div className="silo-cone" />
+            <div className="silo-leg leg-left" />
+            <div className="silo-leg leg-right" />
+            <div className="silo-base" />
+          </div>
+
+          <div className="silo-reading">
+            <span className="reading-label">CURRENT DISTANCE</span>
+            <h4>
+              {format(distance)} <span>cm</span>
+            </h4>
+            <p>Distance from the ultrasonic sensor to the grain surface.</p>
+
+            <div className="sensor-read-status">
+              <span className={`status-dot ${distance !== null ? "online" : ""}`} />
+              <div>
+                <strong>HC-SR04 sensor</strong>
+                <small>
+                  {distance !== null ? "Reading received" : "Waiting for data"}
+                </small>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="silo-note">
+          <CircleCheck size={16} />
+          The silo illustration is decorative, not a measured grain-fill
+          percentage. Accurate fill estimation requires the silo height
+          and sensor mounting position.
+        </div>
+      </section>
+    );
+  }
+
+  function EnvironmentalStatus() {
+    return (
+      <section className="panel environmental-panel">
+        <div className="panel-header">
+          <div>
+            <span className="panel-overline">CURRENT CONDITIONS</span>
+            <h3>Environmental Status</h3>
+            <p className="panel-subtitle">
+              Grain storage environment
+            </p>
+          </div>
+          <div className="panel-icon"><Activity size={22} /></div>
+        </div>
+
+        <div className="environment-row">
+          <div className="environment-icon temperature-color">
+            <Thermometer size={20} />
+          </div>
+          <div className="environment-info">
+            <strong>Temperature</strong>
+            <small>Threshold: 25°C</small>
+          </div>
+          <div className="environment-value">
+            <strong>{format(temperature)}°C</strong>
+            <span className={temperatureAlert ? "text-alert" : ""}>
+              {temperature === null ? "WAITING" : temperatureAlert ? "HIGH" : "NORMAL"}
+            </span>
+          </div>
+        </div>
+
+        <div className="environment-row">
+          <div className="environment-icon humidity-color">
+            <Droplets size={20} />
+          </div>
+          <div className="environment-info">
+            <strong>Humidity</strong>
+            <small>Threshold: 70%</small>
+          </div>
+          <div className="environment-value">
+            <strong>{format(humidity)}%</strong>
+            <span className={humidityAlert ? "text-alert" : ""}>
+              {humidity === null ? "WAITING" : humidityAlert ? "LOW" : "NORMAL"}
+            </span>
+          </div>
+        </div>
+
+        <div className="environment-row">
+          <div className="environment-icon distance-color">
+            <Gauge size={20} />
+          </div>
+          <div className="environment-info">
+            <strong>Grain distance</strong>
+            <small>HC-SR04 ultrasonic sensor</small>
+          </div>
+          <div className="environment-value">
+            <strong>{format(distance)} cm</strong>
+            <span>{distance === null ? "WAITING" : "RECEIVED"}</span>
+          </div>
+        </div>
+
+        <div className="environment-summary">
+          <div>
+            <Database size={18} />
+            <span>Samples collected this session</span>
+          </div>
+          <strong>{history.length}</strong>
+        </div>
+
+        <div className="environment-summary">
+          <div>
+            <Wifi size={18} />
+            <span>Backend connection</span>
+          </div>
+          <strong className={`connection-text ${backendStatus.toLowerCase()}`}>
+            {backendStatus}
+          </strong>
+        </div>
+
+        <p className="muted-note">
+          Aeration threshold rules: temperature above 25°C or humidity
+          below 70%. The decision shown here does not control a physical relay.
+        </p>
+      </section>
+    );
+  }
+
+  function SettingsItem({
+    label,
+    value,
+  }: {
+    label: string;
+    value: string;
+  }) {
+    return (
+      <div className="setting-item">
+        <span>{label}</span>
+        <strong>{value}</strong>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      <aside className={`sidebar ${menuOpen ? "show" : ""}`}>
+        <div className="brand">
+          <div className="brand-logo"><Leaf size={26} /></div>
+          <div className="brand-text">
+            <h1>AGRIGAURD</h1>
+            <span>SMART SILO SYSTEM</span>
+          </div>
+        </div>
+
+        <div className="sidebar-section-label">WORKSPACE</div>
+        <nav>
+          {pages.map(({ name, icon: Icon }) => (
+            <button
+              key={name}
+              className={`nav-item ${activePage === name ? "active" : ""}`}
+              onClick={() => navigateTo(name)}
+              aria-current={activePage === name ? "page" : undefined}
+            >
+              <Icon size={19} />
+              <span>{name}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-bottom">
+          <div className="sidebar-status">
+            <span className={`status-dot ${backendStatus === "ONLINE" ? "online" : ""}`} />
+            <div>
+              <strong>System Status</strong>
+              <small>{backendStatus}</small>
+            </div>
+          </div>
+          <p>AGRIGAURD IoT · v1.0</p>
+        </div>
+      </aside>
+
+      {menuOpen && (
+        <button
+          className="mobile-overlay"
+          aria-label="Close navigation"
+          onClick={() => setMenuOpen(false)}
+        />
+      )}
+
+      <main className="main-content">
+        <header className="topbar">
+          <button
+            className="menu-button"
+            onClick={() => setMenuOpen(!menuOpen)}
+            aria-label="Toggle menu"
+          >
+            {menuOpen ? <X size={22} /> : <Menu size={22} />}
+          </button>
+
+          <div className="topbar-title">
+            <h2>{activePage}</h2>
+            <p>Smart grain storage overview</p>
+          </div>
+
+          <div className={`connection-status ${backendStatus.toLowerCase()}`}>
+            <span className="status-dot" />
+            <span>System Status</span>
+            <strong>{backendStatus}</strong>
+          </div>
+        </header>
+
+        <div className="page-content">
+          {activePage === "Dashboard" && (
+            <>
+              <section className="welcome-section">
+                <div className="welcome-copy">
+                  <span className="panel-overline">AGRICULTURE MONITORING</span>
+                  <h2>Smart Silo Dashboard</h2>
+                  <p>
+                    Monitor grain storage conditions using real-time ESP32
+                    sensor readings.
+                  </p>
+                  <div className="welcome-tags">
+                    <span><Radio size={14} /> ESP32 connected system</span>
+                    <span><Leaf size={14} /> Smart grain storage</span>
+                  </div>
+                </div>
+                <div className="welcome-art">
+                  <div className="welcome-art-circle"><Leaf size={48} /></div>
+                  <span>SMART STORAGE</span>
+                </div>
+              </section>
+
+              <section className="metrics-grid">
+                <MetricCard
+                  title="Temperature"
+                  value={format(temperature)}
+                  unit="°C"
+                  icon={Thermometer}
+                  status={
+                    temperature === null ? "WAITING" :
+                    temperatureAlert ? "HIGH" : "NORMAL"
+                  }
+                  footer="Threshold 25°C"
+                />
+                <MetricCard
+                  title="Humidity"
+                  value={format(humidity)}
+                  unit="%"
+                  icon={Droplets}
+                  status={
+                    humidity === null ? "WAITING" :
+                    humidityAlert ? "LOW" : "NORMAL"
+                  }
+                  footer="Threshold 70%"
+                />
+                <MetricCard
+                  title="Grain Distance"
+                  value={format(distance)}
+                  unit="cm"
+                  icon={Gauge}
+                  status={distance === null ? "WAITING" : "NORMAL"}
+                  footer="Sensor HC-SR04"
+                />
+                <MetricCard
+                  title="Aeration Decision"
+                  value={
+                    temperature === null || humidity === null
+                      ? "--"
+                      : blowerOn ? "ON" : "OFF"
+                  }
+                  icon={Wind}
+                  status={
+                    temperature === null || humidity === null
+                      ? "WAITING"
+                      : blowerOn ? "REQUESTED ON" : "NORMAL"
+                  }
+                  footer="Decision only; no relay control"
+                />
+              </section>
+
+              <div className="content-grid">
+                <GrainSilo />
+                <EnvironmentalStatus />
+              </div>
+
+              <HistoryChart />
+
+              <section className="panel system-panel">
+                <div className="panel-header">
+                  <div>
+                    <span className="panel-overline">SYSTEM STATUS</span>
+                    <h3>Sensor Connections</h3>
+                  </div>
+                  <Radio size={22} />
+                </div>
+
+                <div className="condition-list">
+                  <div className="condition">
+                    <CircleCheck size={20} />
+                    <div><strong>DHT22</strong><small>Temperature and humidity</small></div>
+                    <b>{temperature !== null && humidity !== null ? "DATA RECEIVED" : "WAITING"}</b>
+                  </div>
+                  <div className="condition">
+                    <CircleCheck size={20} />
+                    <div><strong>HC-SR04</strong><small>Grain surface distance</small></div>
+                    <b>{distance !== null ? "DATA RECEIVED" : "WAITING"}</b>
+                  </div>
+                  <div className="condition">
+                    <Wifi size={20} />
+                    <div><strong>Backend API</strong><small>Sensor data connection</small></div>
+                    <b>{backendStatus}</b>
+                  </div>
+                </div>
+              </section>
+            </>
+          )}
+
+          {activePage === "Live Monitoring" && (
+            <>
+              <section className="metrics-grid">
+                <MetricCard title="Temperature" value={format(temperature)} unit="°C" icon={Thermometer} status={temperature === null ? "WAITING" : temperatureAlert ? "HIGH" : "NORMAL"} />
+                <MetricCard title="Humidity" value={format(humidity)} unit="%" icon={Droplets} status={humidity === null ? "WAITING" : humidityAlert ? "LOW" : "NORMAL"} />
+                <MetricCard title="Grain Distance" value={format(distance)} unit="cm" icon={Gauge} status={distance === null ? "WAITING" : "NORMAL"} />
+              </section>
+              <div className="content-grid">
+                <GrainSilo />
+                <EnvironmentalStatus />
+              </div>
+              <HistoryChart />
+            </>
+          )}
+
+          {activePage === "Analytics" && (
+            <>
+              <section className="metrics-grid">
+                <MetricCard title="Collected Readings" value={String(history.length)} icon={Activity} footer="This browser session" />
+                <MetricCard title="Average Temperature" value={format(history.length ? history.reduce((sum, point) => sum + point.temperature, 0) / history.length : null)} unit="°C" icon={Thermometer} />
+                <MetricCard title="Average Humidity" value={format(history.length ? history.reduce((sum, point) => sum + point.humidity, 0) / history.length : null)} unit="%" icon={Droplets} />
+                <MetricCard title="Latest Distance" value={format(distance)} unit="cm" icon={Gauge} />
+              </section>
+              <HistoryChart />
+            </>
+          )}
+
+          {activePage === "Aeration" && (
+            <section className="panel aeration-panel">
+              <div className="panel-header">
+                <div>
+                  <span className="panel-overline">AERATION MANAGEMENT</span>
+                  <h3>Automatic Aeration Decision</h3>
+                  <p className="panel-subtitle">Based on configured temperature and humidity thresholds</p>
+                </div>
+                <div className="panel-icon"><Wind size={24} /></div>
+              </div>
+              <div className="content-grid aeration-grid">
+                <MetricCard title="Temperature Condition" value={temperature === null ? "--" : temperatureAlert ? "HIGH" : "NORMAL"} icon={Thermometer} status={temperature === null ? "WAITING" : temperatureAlert ? "HIGH" : "NORMAL"} footer="Threshold above 25°C" />
+                <MetricCard title="Humidity Condition" value={humidity === null ? "--" : humidityAlert ? "LOW" : "NORMAL"} icon={Droplets} status={humidity === null ? "WAITING" : humidityAlert ? "LOW" : "NORMAL"} footer="Threshold below 70%" />
+              </div>
+              <div className="decision-banner">
+                <Wind size={28} />
+                <div>
+                  <span>Current decision</span>
+                  <strong>
+                    {temperature === null || humidity === null
+                      ? "Waiting for sensor readings"
+                      : blowerOn
+                        ? "Aeration requested ON"
+                        : "Aeration requested OFF"}
+                  </strong>
+                </div>
+              </div>
+              <p className="muted-note">This is a displayed decision only. It does not switch a physical relay or blower.</p>
+            </section>
+          )}
+
+          {activePage === "System Settings" && (
+            <section className="panel settings-panel">
+              <div className="panel-header">
+                <div>
+                  <span className="panel-overline">CONFIGURATION</span>
+                  <h3>System Settings</h3>
+                  <p className="panel-subtitle">Current display and connection settings</p>
+                </div>
+                <div className="panel-icon"><Settings size={22} /></div>
+              </div>
+              <div className="settings-list">
+                <SettingsItem label="Project" value="AGRIGAURD" />
+                <SettingsItem label="Device ID" value={data?.deviceId || "AGRIGAURD-ESP32-01"} />
+                <SettingsItem label="Temperature threshold" value="25°C" />
+                <SettingsItem label="Humidity threshold" value="70%" />
+                <SettingsItem label="Backend status" value={backendStatus} />
+                <SettingsItem label="API endpoint" value={`${API_URL}/api/sensor-data`} />
+                <SettingsItem label="Polling interval" value="Every 2 seconds" />
+                <SettingsItem label="OLED display" value="0.96-inch I2C" />
+              </div>
+              <p className="muted-note">These settings are display-only and do not change the ESP32 firmware.</p>
+            </section>
+          )}
+
+          <footer className="app-footer">
+            <div className="footer-brand">
+              <div className="footer-logo"><Leaf size={19} /></div>
+              <div><strong>AGRIGAURD</strong><span>Smart Grain Silo Monitoring System</span></div>
+            </div>
+            <div className="footer-last">
+              Last received: <strong>{data?.timestamp ? new Date(data.timestamp).toLocaleTimeString() : "Timestamp unavailable"}</strong>
+            </div>
+          </footer>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default App;
